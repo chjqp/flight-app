@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Expo QR Code</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f0f0f0;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        img {
+            border: 2px solid #ddd;
+            border-radius: 5px;
+        }
+        .url {
+            margin-top: 20px;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 5px;
+            font-family: monospace;
+            word-break: break-all;
+        }
+        .instructions {
+            margin-top: 20px;
+            color: #666;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📱 扫描二维码连接 Expo Go</h1>
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=exp://hdwxkjc-chjqp-8081.exp.direct" alt="QR Code">
+        <div class="url">
+            exp://hdwxkjc-chjqp-8081.exp.direct
+        </div>
+        <div class="instructions">
+            <p><strong>使用方法：</strong></p>
+            <p>1. 打开 Expo Go App</p>
+            <p>2. 点击 "Scan QR code"</p>
+            <p>3. 扫描上方二维码</p>
+            <p>或者手动输入上方地址</p>
+        </div>
+    </div>
+</body>
+</html>
