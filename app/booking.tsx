@@ -40,13 +40,14 @@ export default function BookingScreen() {
     );
   }
 
-  // 自动填表脚本（改进版）
+  // 自动填表脚本（改进版 - 修复字段识别错误）
   const getFillScript = () => {
     if (!passenger) return '';
     
     return `
       (function() {
         const passenger = ${JSON.stringify(passenger)};
+        const usedInputs = new Set();
         
         function fillInput(el, value) {
           if (!el || !value) return false;
@@ -74,17 +75,30 @@ export default function BookingScreen() {
           return true;
         }
         
-        function findInput(selectors) {
+        function findInput(selectors, expectedValue) {
           for (let i = 0; i < selectors.length; i++) {
             const els = document.querySelectorAll(selectors[i]);
             for (let j = 0; j < els.length; j++) {
               const el = els[j];
-              if (el && el.offsetParent !== null && !el.disabled) {
-                return el;
+              if (el && el.offsetParent !== null && !el.disabled && !usedInputs.has(el)) {
+                // 尝试填写并验证
+                fillInput(el, expectedValue);
+                
+                // 等待一小会让值生效
+                setTimeout(function() {}, 100);
+                
+                // 验证值是否正确填入
+                if (el.value === expectedValue || el.value.includes(expectedValue)) {
+                  usedInputs.add(el);
+                  return { el: el, success: true };
+                } else {
+                  // 填写失败，清空并继续尝试下一个
+                  el.value = '';
+                }
               }
             }
           }
-          return null;
+          return { el: null, success: false };
         }
         
         function sendStatus(msg) {
@@ -94,38 +108,63 @@ export default function BookingScreen() {
         function tryFill() {
           sendStatus('正在分析页面...');
           
-          const nameInput = findInput([
+          const results = [];
+          
+          // 填写姓名
+          const nameResult = findInput([
+            'input[placeholder*="乘机人"]',
             'input[placeholder*="旅客"]',
             'input[placeholder*="姓名"]',
             'input[name*="name" i]',
-          ]);
+            'input[placeholder*="乘客"]',
+          ], passenger.name);
           
-          const idInput = findInput([
+          if (nameResult.success) {
+            const displayName = passenger.name.length > 2 ? passenger.name.substring(0, 2) + '...' : passenger.name;
+            results.push('✓ 姓名: ' + displayName);
+          }
+          
+          // 填写身份证
+          const idResult = findInput([
+            'input[placeholder*="证件号码"]',
             'input[placeholder*="证件"]',
             'input[placeholder*="身份证"]',
             'input[name*="card" i]',
             'input[name*="idno" i]',
-          ]);
+            'input[name*="credential" i]',
+          ], passenger.idNumber);
           
-          const phoneInput = findInput([
+          if (idResult.success) {
+            const displayId = passenger.idNumber.length > 4 ? passenger.idNumber.substring(0, 4) + '...' : passenger.idNumber;
+            results.push('✓ 身份证: ' + displayId);
+          }
+          
+          // 填写手机
+          const phoneResult = findInput([
+            'input[placeholder*="联系手机"]',
             'input[placeholder*="手机"]',
             'input[placeholder*="电话"]',
             'input[type="tel"]',
             'input[name*="phone" i]',
-          ]);
+            'input[name*="mobile" i]',
+          ], passenger.phone);
           
-          let filled = 0;
-          if (nameInput) { fillInput(nameInput, passenger.name); filled++; }
-          if (idInput) { fillInput(idInput, passenger.idNumber); filled++; }
-          if (phoneInput) { fillInput(phoneInput, passenger.phone); filled++; }
+          if (phoneResult.success) {
+            const displayPhone = passenger.phone.length > 3 ? passenger.phone.substring(0, 3) + '...' : passenger.phone;
+            results.push('✓ 手机: ' + displayPhone);
+          }
           
-          if (filled > 0) {
-            sendStatus('已填写' + filled + '个字段 ✓');
+          if (results.length > 0) {
+            sendStatus(results.join('  '));
+            // 延迟发送汇总消息
+            setTimeout(function() {
+              sendStatus('已完成自动填表，共填写 ' + results.length + ' 个字段 ✓');
+            }, 500);
           } else {
             sendStatus('未找到表单，可能还在搜索页');
           }
           
-          return filled;
+          return results.length;
         }
         
         let attempts = 0;

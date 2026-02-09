@@ -31,18 +31,7 @@ export default function SearchScreen() {
 
   const [date, setDate] = useState(tomorrow());
 
-  const doSearch = async () => {
-    // 验证输入
-    if (!from.trim() || !to.trim()) {
-      alert('请输入出发和到达城市');
-      return;
-    }
-
-    if (!name.trim() || !idNumber.trim() || !phone.trim()) {
-      const confirm = window.confirm('乘客信息未填写完整，将无法自动填表。是否继续？');
-      if (!confirm) return;
-    }
-
+  const performSearch = async () => {
     // 保存乘客信息
     await AsyncStorage.multiSet([
       ['name', name],
@@ -55,6 +44,28 @@ export default function SearchScreen() {
       pathname: '/results',
       params: { from, to, date },
     });
+  };
+
+  const doSearch = async () => {
+    // 验证输入
+    if (!from.trim() || !to.trim()) {
+      Alert.alert('提示', '请输入出发和到达城市');
+      return;
+    }
+
+    if (!name.trim() || !idNumber.trim() || !phone.trim()) {
+      Alert.alert(
+        '提示',
+        '乘客信息未填写完整，将无法自动填表。是否继续？',
+        [
+          { text: '取消', style: 'cancel' },
+          { text: '继续', onPress: () => performSearch() },
+        ]
+      );
+      return;
+    }
+
+    await performSearch();
   };
 
   const swap = () => {

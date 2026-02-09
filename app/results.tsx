@@ -14,17 +14,53 @@ interface Flight {
   stops: number;
 }
 
+interface PlatformStatus {
+  status: 'searching' | 'found' | 'notfound' | 'error';
+  count: number;
+}
+
 export default function ResultsScreen() {
   const { from, to, date } = useLocalSearchParams<{ from: string; to: string; date: string }>();
   const [flights, setFlights] = useState<Flight[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showWebView, setShowWebView] = useState(Platform.OS !== 'web');
-  const webviewRef = useRef<WebView>(null);
-  const [retryCount, setRetryCount] = useState(0);
+  const qunarRef = useRef<WebView>(null);
+  const ctripRef = useRef<WebView>(null);
+  const fliggyRef = useRef<WebView>(null);
+  
+  const [platformStatus, setPlatformStatus] = useState<Record<string, PlatformStatus>>({
+    qunar: { status: 'searching', count: 0 },
+    ctrip: { status: 'searching', count: 0 },
+    fliggy: { status: 'searching', count: 0 },
+  });
+  
+  const [completedPlatforms, setCompletedPlatforms] = useState(new Set<string>());
+
+  // 城市代码映射（携程用）
+  const ctripCityCode: Record<string, string> = {
+    '北京': 'BJS', '上海': 'SHA', '广州': 'CAN', '深圳': 'SZX', '成都': 'CTU',
+    '昆明': 'KMG', '杭州': 'HGH', '西安': 'SIA', '重庆': 'CKG', '武汉': 'WUH',
+    '南京': 'NKG', '长沙': 'CSX', '厦门': 'XMN', '青岛': 'TAO', '大连': 'DLC',
+    '三亚': 'SYX', '海口': 'HAK', '哈尔滨': 'HRB', '沈阳': 'SHE', '天津': 'TSN',
+    '郑州': 'CGO', '贵阳': 'KWE',
+  };
 
   // 去哪儿搜索URL
   const qunarUrl = `https://m.flight.qunar.com/ncs/page/flightlist?depCity=${encodeURIComponent(from!)}&arrCity=${encodeURIComponent(to!)}&goDate=${date}`;
+  
+  // 携程搜索URL
+  const getCtripUrl = () => {
+    const fromCode = ctripCityCode[from!];
+    const toCode = ctripCityCode[to!];
+    if (!fromCode || !toCode) return null;
+    return `https://m.ctrip.com/html5/flight/swift/domestic/${fromCode}-${toCode}/${date}`;
+  };
+  
+  // 飞猪搜索URL
+  const fliggyUrl = `https://h5.m.goofly.com/fliggy-offline/index.html#/flight/list?depCityName=${encodeURIComponent(from!)}&arrCityName=${encodeURIComponent(to!)}&depDate=${date}`;
+
+  const ctripUrl = getCtripUrl();
 
   // Web端fallback：直接打开去哪儿
   useEffect(() => {
@@ -34,51 +70,117 @@ export default function ResultsScreen() {
     }
   }, []);
 
-  // JS注入脚本：提取航班数据（简化版，更可靠）
-  const extractScript = `
+  // 基于内容特征的提取脚本
+  const getExtractScript = (platform: string) => `
     (function() {
+      const platform = '${platform}';
+      let retryAttempts = 0;
+      const maxRetries = 20;
+      
       function sendData(data) {
         window.ReactNativeWebView.postMessage(JSON.stringify(data));
       }
-
-      function tryExtract() {
-        // 简化提取逻辑：只找价格和时间
-        const priceElements = document.querySelectorAll('[class*="price"], [class*="Price"]');
-        const timeElements = document.querySelectorAll('[class*="time"], [class*="Time"]');
-        
-        const flights = [];
-        const prices = Array.from(priceElements).map(el => {
-          const match = el.textContent.match(/\\d{2,5}/);
-          return match ? parseInt(match[0]) : 0;
-        }).filter(p => p > 100 && p < 10000);
-
-        const times = Array.from(timeElements).map(el => {
-          const match = el.textContent.match(/\\d{2}:\\d{2}/);
-          return match ? match[0] : '';
-        }).filter(t => t);
-
-        // 简单配对
-        for (let i = 0; i < Math.min(prices.length, Math.floor(times.length / 2)); i++) {
-          flights.push({
-            platform: 'qunar',
-            price: prices[i],
-            depTime: times[i * 2] || '',
-            arrTime: times[i * 2 + 1] || '',
-            airline: '',
-            flightNo: '',
-            stops: 0,
-            duration: ''
-          });
-        }
-
-        if (flights.length > 0) {
-          sendData({ type: 'flights', data: flights });
-        } else {
-          sendData({ type: 'error', message: '未找到航班数据' });
-        }
+      
+      function sendProgress(attempt) {
+        sendData({ type: 'progress', platform: platform, attempt: attempt, max: maxRetries });
       }
 
-      setTimeout(tryExtract, 5000);
+      function tryExtract() {
+        retryAttempts++;
+        sendProgress(retryAttempts);
+        
+        const flights = [];
+        const seen = new Set();
+        
+        // 遍历所有可能的航班卡片容器
+        const containers = document.querySelectorAll('div, li, section, article');
+        
+        for (let i = 0; i < containers.length; i++) {
+          const container = containers[i];
+          const text = container.innerText || container.textContent || '';
+          
+          // 跳过太长或太短的元素
+          if (text.length < 20 || text.length > 500) continue;
+          
+          // 查找价格（¥数字格式）
+          const priceMatch = text.match(/¥\\s*(\\d{2,5})/);
+          if (!priceMatch) continue;
+          const price = parseInt(priceMatch[1]);
+          if (price < 100 || price > 10000) continue;
+          
+          // 查找时间（xx:xx格式）
+          const timeMatches = text.match(/\\d{2}:\\d{2}/g);
+          if (!timeMatches || timeMatches.length < 2) continue;
+          
+          const depTime = timeMatches[0];
+          const arrTime = timeMatches[1];
+          
+          // 去重：使用价格+时间作为唯一标识
+          const key = price + '-' + depTime + '-' + arrTime;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          
+          // 提取航司名
+          let airline = '';
+          const airlinePatterns = ['国航', '东航', '南航', '海航', '川航', '春秋', '吉祥', '厦航', '山航', '深航', '昆航'];
+          for (let j = 0; j < airlinePatterns.length; j++) {
+            if (text.includes(airlinePatterns[j])) {
+              airline = airlinePatterns[j];
+              break;
+            }
+          }
+          
+          // 提取航班号（XX1234格式）
+          const flightNoMatch = text.match(/[A-Z]{2}\\d{3,4}/);
+          const flightNo = flightNoMatch ? flightNoMatch[0] : '';
+          
+          // 判断是否中转
+          const stops = text.includes('中转') || text.includes('经停') ? 1 : 0;
+          
+          flights.push({
+            platform: platform,
+            price: price,
+            flightNo: flightNo,
+            airline: airline,
+            depTime: depTime,
+            arrTime: arrTime,
+            duration: '',
+            stops: stops
+          });
+        }
+        
+        // 去重并排序
+        const uniqueFlights = [];
+        const flightKeys = new Set();
+        for (let i = 0; i < flights.length; i++) {
+          const f = flights[i];
+          const key = f.price + '-' + f.depTime + '-' + f.arrTime;
+          if (!flightKeys.has(key)) {
+            flightKeys.add(key);
+            uniqueFlights.push(f);
+          }
+        }
+        
+        // 按价格排序
+        uniqueFlights.sort(function(a, b) { return a.price - b.price; });
+        
+        if (uniqueFlights.length > 0) {
+          sendData({ type: 'flights', platform: platform, data: uniqueFlights });
+        } else if (retryAttempts >= maxRetries) {
+          sendData({ type: 'notfound', platform: platform });
+        }
+        
+        return uniqueFlights.length;
+      }
+
+      const timer = setInterval(function() {
+        const found = tryExtract();
+        if (found > 0 || retryAttempts >= maxRetries) {
+          clearInterval(timer);
+        }
+      }, 2000);
+      
+      sendProgress(0);
     })();
     true;
   `;
@@ -86,34 +188,57 @@ export default function ResultsScreen() {
   const onMessage = (event: any) => {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
+      
       if (msg.type === 'flights') {
-        if (msg.data.length > 0) {
-          setFlights(msg.data);
-          setLoading(false);
-          setShowWebView(false);
-        } else {
-          handleError('未找到航班，请重试');
-        }
-      } else if (msg.type === 'error') {
-        handleError(msg.message);
+        // 收到航班数据
+        setFlights(prev => {
+          const newFlights = [...prev, ...msg.data];
+          // 按价格排序
+          newFlights.sort((a, b) => a.price - b.price);
+          return newFlights;
+        });
+        
+        setPlatformStatus(prev => ({
+          ...prev,
+          [msg.platform]: { status: 'found', count: msg.data.length }
+        }));
+        
+        setCompletedPlatforms(prev => new Set(prev).add(msg.platform));
+        
+      } else if (msg.type === 'notfound') {
+        setPlatformStatus(prev => ({
+          ...prev,
+          [msg.platform]: { status: 'notfound', count: 0 }
+        }));
+        
+        setCompletedPlatforms(prev => new Set(prev).add(msg.platform));
+        
+      } else if (msg.type === 'progress') {
+        // 更新搜索进度
+        setPlatformStatus(prev => ({
+          ...prev,
+          [msg.platform]: { ...prev[msg.platform], status: 'searching' }
+        }));
       }
     } catch (e) {
-      handleError('数据解析失败');
+      console.error('Parse error:', e);
     }
   };
 
-  const handleError = (msg: string) => {
-    setError(msg);
-    setLoading(false);
-    if (retryCount < 2) {
-      setTimeout(() => {
-        setRetryCount(retryCount + 1);
-        setLoading(true);
-        setError('');
-        setShowWebView(true);
-      }, 2000);
+  // 检查是否所有平台都完成了
+  useEffect(() => {
+    const shouldShowCtrip = ctripUrl !== null;
+    const totalPlatforms = shouldShowCtrip ? 3 : 2;
+    
+    if (completedPlatforms.size >= totalPlatforms) {
+      setLoading(false);
+      setShowWebView(false);
+      
+      if (flights.length === 0) {
+        setError('未找到航班');
+      }
     }
-  };
+  }, [completedPlatforms, flights, ctripUrl]);
 
   const bookFlight = (flight: Flight) => {
     if (Platform.OS === 'web') {
@@ -121,11 +246,26 @@ export default function ResultsScreen() {
       return;
     }
     
+    let url = qunarUrl;
+    
+    // 根据平台构造URL
+    if (flight.platform === 'qunar') {
+      url = `https://m.flight.qunar.com/ncs/page/flightlist?depCity=${encodeURIComponent(from!)}&arrCity=${encodeURIComponent(to!)}&goDate=${date}`;
+    } else if (flight.platform === 'ctrip') {
+      const fromCode = ctripCityCode[from!];
+      const toCode = ctripCityCode[to!];
+      if (fromCode && toCode) {
+        url = `https://m.ctrip.com/html5/flight/swift/domestic/${fromCode}-${toCode}/${date}`;
+      }
+    } else if (flight.platform === 'fliggy') {
+      url = `https://h5.m.goofly.com/fliggy-offline/index.html#/flight/list?depCityName=${encodeURIComponent(from!)}&arrCityName=${encodeURIComponent(to!)}&depDate=${date}`;
+    }
+    
     router.push({
       pathname: '/booking',
       params: {
-        url: qunarUrl,
-        platform: 'qunar',
+        url: url,
+        platform: flight.platform,
         flightNo: flight.flightNo,
       },
     });
@@ -144,11 +284,30 @@ export default function ResultsScreen() {
 
   const cheapest = flights.length > 0 ? Math.min(...flights.map(f => f.price)) : 0;
 
+  const getPlatformColor = (platform: string) => {
+    if (platform === 'qunar') return '#FFB90F';
+    if (platform === 'ctrip') return '#0086F6';
+    if (platform === 'fliggy') return '#9C27B0';
+    return '#999';
+  };
+
+  const getPlatformName = (platform: string) => {
+    if (platform === 'qunar') return '去哪儿';
+    if (platform === 'ctrip') return '携程';
+    if (platform === 'fliggy') return '飞猪';
+    return platform;
+  };
+
   const renderFlight = ({ item }: { item: Flight }) => (
     <View style={s.fCard}>
       <View style={s.fMain}>
         <View style={s.fLeft}>
-          {item.airline && <Text style={s.fAirline}>{item.airline} {item.flightNo}</Text>}
+          <View style={s.fTopRow}>
+            {item.airline && <Text style={s.fAirline}>{item.airline} {item.flightNo}</Text>}
+            <View style={[s.platformBadge, { backgroundColor: getPlatformColor(item.platform) }]}>
+              <Text style={s.platformBadgeText}>{getPlatformName(item.platform)}</Text>
+            </View>
+          </View>
           <Text style={s.fTime}>{item.depTime} → {item.arrTime}</Text>
           <Text style={s.fMeta}>{item.stops === 0 ? '直飞' : `${item.stops}次中转`}</Text>
         </View>
@@ -163,15 +322,62 @@ export default function ResultsScreen() {
     </View>
   );
 
+  const renderPlatformStatus = () => {
+    const platforms = [
+      { key: 'qunar', name: '去哪儿', icon: '🟡' },
+      { key: 'ctrip', name: '携程', icon: '🔵', skip: !ctripUrl },
+      { key: 'fliggy', name: '飞猪', icon: '🟣' },
+    ];
+
+    return (
+      <View style={s.platformStatusContainer}>
+        <Text style={s.platformStatusTitle}>正在搜索...</Text>
+        {platforms.map(p => {
+          if (p.skip) return null;
+          const status = platformStatus[p.key];
+          let statusText = '搜索中...';
+          if (status.status === 'found') statusText = `找到${status.count}个 ✓`;
+          if (status.status === 'notfound') statusText = '未找到 ✗';
+          
+          return (
+            <Text key={p.key} style={s.platformStatusRow}>
+              {p.icon} {p.name}: {statusText}
+            </Text>
+          );
+        })}
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={s.safe}>
       {showWebView && Platform.OS !== 'web' && (
         <View style={{ height: 0, overflow: 'hidden' }}>
           <WebView
-            ref={webviewRef}
+            ref={qunarRef}
             source={{ uri: qunarUrl }}
             onMessage={onMessage}
-            injectedJavaScript={extractScript}
+            injectedJavaScript={getExtractScript('qunar')}
+            javaScriptEnabled={true}
+            domStorageEnabled={true}
+            userAgent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1"
+          />
+          {ctripUrl && (
+            <WebView
+              ref={ctripRef}
+              source={{ uri: ctripUrl }}
+              onMessage={onMessage}
+              injectedJavaScript={getExtractScript('ctrip')}
+              javaScriptEnabled={true}
+              domStorageEnabled={true}
+              userAgent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1"
+            />
+          )}
+          <WebView
+            ref={fliggyRef}
+            source={{ uri: fliggyUrl }}
+            onMessage={onMessage}
+            injectedJavaScript={getExtractScript('fliggy')}
             javaScriptEnabled={true}
             domStorageEnabled={true}
             userAgent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1"
@@ -187,8 +393,7 @@ export default function ResultsScreen() {
       {loading ? (
         <View style={s.center}>
           <ActivityIndicator size="large" color="#1a73e8" />
-          <Text style={s.loadText}>正在搜索航班...</Text>
-          {retryCount > 0 && <Text style={s.retryText}>重试中 ({retryCount}/2)</Text>}
+          {renderPlatformStatus()}
         </View>
       ) : error ? (
         <View style={s.center}>
@@ -230,7 +435,10 @@ const s = StyleSheet.create({
   fCard: { backgroundColor: '#fff', borderRadius: 12, marginBottom: 10, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 6, elevation: 1 },
   fMain: { flexDirection: 'row', alignItems: 'center', padding: 14, paddingHorizontal: 16 },
   fLeft: { flex: 1 },
+  fTopRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
   fAirline: { fontSize: 12, color: '#999' },
+  platformBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
+  platformBadgeText: { fontSize: 10, color: '#fff', fontWeight: '600' },
   fTime: { fontSize: 18, fontWeight: '600', marginVertical: 3 },
   fMeta: { fontSize: 11, color: '#aaa' },
   fRight: { alignItems: 'flex-end', marginLeft: 12 },
@@ -238,4 +446,7 @@ const s = StyleSheet.create({
   fCheap: { fontSize: 10, color: '#ea4335', backgroundColor: '#fef0f0', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 3, marginTop: 3 },
   bookBtn: { backgroundColor: '#1a73e8', padding: 12, alignItems: 'center', margin: 10, marginTop: 0, borderRadius: 8 },
   bookBtnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  platformStatusContainer: { marginTop: 20, backgroundColor: '#fff', borderRadius: 12, padding: 16, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  platformStatusTitle: { fontSize: 15, fontWeight: '600', marginBottom: 12, textAlign: 'center' },
+  platformStatusRow: { fontSize: 14, color: '#666', marginVertical: 4 },
 });
