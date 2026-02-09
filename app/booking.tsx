@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, ActivityIndicator, Platform, ScrollView } from 'react-native';
 import { WebView } from 'react-native-webview';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams } from 'expo-router';
@@ -19,12 +19,29 @@ export default function BookingScreen() {
   const [currentUrl, setCurrentUrl] = useState(url || '');
 
   const addLog = (msg: string) => {
-    setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} ${msg}`]);
+    const logEntry = `${new Date().toLocaleTimeString()} ${msg}`;
+    setLogs(prev => {
+      const newLogs = [...prev, logEntry];
+      // 保存到AsyncStorage
+      AsyncStorage.setItem('booking_logs', JSON.stringify(newLogs.slice(-100))); // 只保存最近100条
+      return newLogs;
+    });
     setStatus(msg);
   };
 
   useEffect(() => {
     addLog('🔍 正在读取乘客信息...');
+    
+    // 读取保存的日志
+    AsyncStorage.getItem('booking_logs').then(savedLogs => {
+      if (savedLogs) {
+        try {
+          const parsed = JSON.parse(savedLogs);
+          setLogs(prev => [...parsed, ...prev]);
+        } catch (e) {}
+      }
+    });
+    
     AsyncStorage.multiGet(['name', 'idNumber', 'phone']).then(values => {
       const data: any = {};
       values.forEach(([key, value]) => {
@@ -135,6 +152,32 @@ export default function BookingScreen() {
           window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'log', message: msg }));
         }
         
+        // 发送DOM结构供调试
+        function sendDOMInfo() {
+          const inputs = document.querySelectorAll('input');
+          const inputInfo = [];
+          for (let i = 0; i < inputs.length; i++) {
+            const inp = inputs[i];
+            if (inp.offsetParent !== null) { // 只要可见的
+              inputInfo.push({
+                type: inp.type,
+                placeholder: inp.placeholder,
+                name: inp.name,
+                id: inp.id,
+                value: inp.value,
+                className: inp.className
+              });
+            }
+          }
+          sendLog('📊 页面共有 ' + inputInfo.length + ' 个可见input');
+          window.ReactNativeWebView.postMessage(JSON.stringify({ 
+            type: 'dom_info', 
+            inputs: inputInfo,
+            url: window.location.href,
+            html: document.body.innerHTML.substring(0, 5000) // 只发前5000字符
+          }));
+        }
+        
         // 自动选择套餐（根据偏好）
         function autoSelectPackage() {
           sendLog('🎯 根据偏好"' + preference + '"自动选择套餐...');
@@ -231,6 +274,9 @@ export default function BookingScreen() {
         
         function fillForm() {
           sendLog('📝 开始填写表单...');
+          
+          // 先发送DOM信息供调试
+          sendDOMInfo();
           
           const results = [];
           
@@ -366,6 +412,15 @@ export default function BookingScreen() {
         setStatus(data.message);
       } else if (data.type === 'log') {
         addLog(data.message);
+      } else if (data.type === 'dom_info') {
+        // 保存DOM信息供调试
+        addLog('📊 收到DOM信息，共' + data.inputs.length + '个input');
+        AsyncStorage.setItem('debug_dom_info', JSON.stringify(data));
+        
+        // 详细显示每个input
+        data.inputs.forEach((inp: any, i: number) => {
+          addLog(`  Input[${i}]: type=${inp.type}, placeholder="${inp.placeholder}", name="${inp.name}", id="${inp.id}"`);
+        });
       }
     } catch (e) {}
   };
@@ -394,6 +449,32 @@ export default function BookingScreen() {
     setStatus('正在尝试填表...');
   };
 
+  const clearLogs = () => {
+    setLogs(['📱 日志已清除']);
+    AsyncStorage.removeItem('booking_logs');
+  };
+
+  const exportLogs = () => {
+    const logText = logs.join('\n');
+    addLog('📋 日志内容：\n' + logText);
+  };
+
+  const viewDOMInfo = async () => {
+    const domInfo = await AsyncStorage.getItem('debug_dom_info');
+    if (domInfo) {
+      const data = JSON.parse(domInfo);
+      addLog('=== DOM调试信息 ===');
+      addLog('URL: ' + data.url);
+      addLog('共' + data.inputs.length + '个可见input:');
+      data.inputs.forEach((inp: any, i: number) => {
+        addLog(`[${i}] type=${inp.type}, placeholder="${inp.placeholder}", name="${inp.name}", id="${inp.id}", value="${inp.value}"`);
+      });
+      setShowLogs(true);
+    } else {
+      addLog('⚠️ 暂无DOM信息，请先进入填表页');
+    }
+  };
+
   const [showLogs, setShowLogs] = useState(false);
 
   return (
@@ -403,6 +484,9 @@ export default function BookingScreen() {
         <TouchableOpacity style={s.fillBtn} onPress={manualFill}>
           <Text style={s.fillBtnText}>填表</Text>
         </TouchableOpacity>
+        <TouchableOpacity style={s.debugBtn} onPress={viewDOMInfo}>
+          <Text style={s.debugBtnText}>DOM</Text>
+        </TouchableOpacity>
         <TouchableOpacity style={s.logBtn} onPress={() => setShowLogs(!showLogs)}>
           <Text style={s.logBtnText}>{showLogs ? '隐藏' : '日志'}</Text>
         </TouchableOpacity>
@@ -410,10 +494,17 @@ export default function BookingScreen() {
 
       {showLogs && (
         <View style={s.logContainer}>
-          <Text style={s.logTitle}>📋 操作日志</Text>
-          {logs.slice(-10).map((log, i) => (
-            <Text key={i} style={s.logText}>{log}</Text>
-          ))}
+          <View style={s.logHeader}>
+            <Text style={s.logTitle}>📋 操作日志（共{logs.length}条）</Text>
+            <TouchableOpacity style={s.clearBtn} onPress={clearLogs}>
+              <Text style={s.clearBtnText}>清除</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={s.logScroll}>
+            {logs.map((log, i) => (
+              <Text key={i} style={s.logText}>{log}</Text>
+            ))}
+          </ScrollView>
         </View>
       )}
 
@@ -450,10 +541,16 @@ const s = StyleSheet.create({
   statusText: { flex: 1, fontSize: 13, color: '#666' },
   fillBtn: { backgroundColor: '#1a73e8', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6, marginLeft: 8 },
   fillBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  debugBtn: { backgroundColor: '#ff9800', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6, marginLeft: 8 },
+  debugBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   logBtn: { backgroundColor: '#666', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6, marginLeft: 8 },
   logBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
-  logContainer: { backgroundColor: '#f8f9fa', padding: 12, maxHeight: 200, borderBottomWidth: 1, borderColor: '#eee' },
-  logTitle: { fontSize: 14, fontWeight: '600', marginBottom: 8 },
+  logContainer: { backgroundColor: '#f8f9fa', padding: 12, maxHeight: 300, borderBottomWidth: 1, borderColor: '#eee' },
+  logHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  logTitle: { fontSize: 14, fontWeight: '600' },
+  clearBtn: { backgroundColor: '#ea4335', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 4 },
+  clearBtnText: { color: '#fff', fontSize: 11, fontWeight: '600' },
+  logScroll: { maxHeight: 250 },
   logText: { fontSize: 11, color: '#666', marginVertical: 2, fontFamily: 'monospace' },
   webview: { flex: 1 },
   loadingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
