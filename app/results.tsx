@@ -31,11 +31,10 @@ export default function ResultsScreen() {
   
   const [platformStatus, setPlatformStatus] = useState<Record<string, PlatformStatus>>({
     qunar: { status: 'searching', count: 0 },
-    // ctrip: { status: 'searching', count: 0 }, // 暂时禁用，需要专门适配
-    // fliggy: { status: 'searching', count: 0 }, // 暂时禁用，证书问题
   });
   
   const [completedPlatforms, setCompletedPlatforms] = useState(new Set<string>());
+  const [searchLogs, setSearchLogs] = useState<string[]>(['🔍 开始搜索航班...']);
 
   // 城市代码映射（携程用）
   const ctripCityCode: Record<string, string> = {
@@ -215,10 +214,12 @@ export default function ResultsScreen() {
       if (msg.type === 'debug') {
         // 调试信息，打印到控制台
         console.log(`[${msg.platform}] ${msg.message}`);
+        setSearchLogs(prev => [...prev, `[${msg.platform}] ${msg.message}`]);
         
       } else if (msg.type === 'flights') {
         // 收到航班数据
         console.log(`[${msg.platform}] 找到 ${msg.data.length} 个航班`);
+        setSearchLogs(prev => [...prev, `✓ ${msg.platform}: 找到 ${msg.data.length} 个航班`]);
         setFlights(prev => {
           const newFlights = [...prev, ...msg.data];
           // 按价格排序
@@ -235,6 +236,7 @@ export default function ResultsScreen() {
         
       } else if (msg.type === 'notfound') {
         console.log(`[${msg.platform}] 未找到航班`);
+        setSearchLogs(prev => [...prev, `✗ ${msg.platform}: 未找到航班`]);
         setPlatformStatus(prev => ({
           ...prev,
           [msg.platform]: { status: 'notfound', count: 0 }
@@ -265,9 +267,21 @@ export default function ResultsScreen() {
       
       if (flights.length === 0) {
         setError('未找到航班');
+        setSearchLogs(prev => [...prev, '❌ 搜索完成，未找到航班']);
+      } else {
+        setSearchLogs(prev => [...prev, `✅ 搜索完成，共找到 ${flights.length} 个航班`]);
+        
+        // 根据偏好自动选择并订票
+        if (preference === 'cheapest' && flights.length > 0) {
+          const cheapest = flights[0]; // 已经按价格排序了
+          setSearchLogs(prev => [...prev, `🎯 根据偏好自动选择最便宜的：¥${cheapest.price}`]);
+          setTimeout(() => {
+            bookFlight(cheapest);
+          }, 2000);
+        }
       }
     }
-  }, [completedPlatforms, flights]);
+  }, [completedPlatforms, flights, preference]);
 
   const bookFlight = (flight: Flight) => {
     if (Platform.OS === 'web') {
@@ -406,6 +420,12 @@ export default function ResultsScreen() {
         <View style={s.center}>
           <ActivityIndicator size="large" color="#1a73e8" />
           {renderPlatformStatus()}
+          <View style={s.logContainer}>
+            <Text style={s.logTitle}>📋 搜索日志</Text>
+            {searchLogs.slice(-5).map((log, i) => (
+              <Text key={i} style={s.logText}>{log}</Text>
+            ))}
+          </View>
         </View>
       ) : error ? (
         <View style={s.center}>
@@ -462,4 +482,7 @@ const s = StyleSheet.create({
   platformStatusTitle: { fontSize: 15, fontWeight: '600', marginBottom: 12, textAlign: 'center' },
   platformStatusRow: { fontSize: 14, color: '#666', marginVertical: 4 },
   platformTip: { fontSize: 12, color: '#999', marginTop: 8, textAlign: 'center' },
+  logContainer: { marginTop: 20, backgroundColor: '#f8f9fa', borderRadius: 12, padding: 12, width: '90%' },
+  logTitle: { fontSize: 13, fontWeight: '600', marginBottom: 8, color: '#666' },
+  logText: { fontSize: 11, color: '#666', marginVertical: 2, fontFamily: 'monospace' },
 });

@@ -228,18 +228,19 @@ export default function BookingScreen() {
           
           const results = [];
           
-          // 填写姓名（改进：更宽松的匹配）
-          sendLog('📝 正在填写姓名...');
+          // ⚠️ 重要：必须先填姓名，再填其他字段！
+          // 填写姓名（改进：更宽松的匹配，并且排第一个）
+          sendLog('📝 [1/3] 正在填写姓名...');
           const nameResult = findInput([
             'input[placeholder*="姓名"]',
             'input[placeholder*="名字"]',
+            'input[name*="name" i]',
+            'input[id*="name" i]',
             'input[placeholder*="乘机人"]',
             'input[placeholder*="旅客"]',
             'input[placeholder*="乘客"]',
             'input[placeholder*="联系人"]',
-            'input[name*="name" i]',
             'input[name*="passenger" i]',
-            'input[id*="name" i]',
             // 最后兜底：找第一个text类型的input（排除证件和手机）
             'input[type="text"]:not([placeholder*="证件"]):not([placeholder*="身份证"]):not([placeholder*="手机"]):not([placeholder*="电话"]):not([placeholder*="号码"])',
           ], passenger.name, '姓名');
@@ -252,8 +253,8 @@ export default function BookingScreen() {
             sendLog('✗ 姓名字段未找到');
           }
           
-          // 填写身份证
-          sendLog('📝 正在填写身份证...');
+          // 填写身份证（必须在姓名之后）
+          sendLog('📝 [2/3] 正在填写身份证...');
           const idResult = findInput([
             'input[placeholder*="身份证"]',
             'input[placeholder*="证件号码"]',
@@ -262,6 +263,8 @@ export default function BookingScreen() {
             'input[name*="idno" i]',
             'input[name*="card" i]',
             'input[name*="credential" i]',
+            'input[id*="idcard" i]',
+            'input[id*="certno" i]',
           ], passenger.idNumber, '身份证');
           
           if (idResult.success) {
@@ -272,8 +275,8 @@ export default function BookingScreen() {
             sendLog('✗ 身份证字段未找到');
           }
           
-          // 填写手机
-          sendLog('📝 正在填写手机号...');
+          // 填写手机（必须在最后）
+          sendLog('📝 [3/3] 正在填写手机号...');
           const phoneResult = findInput([
             'input[placeholder*="手机"]',
             'input[placeholder*="联系手机"]',
@@ -281,6 +284,8 @@ export default function BookingScreen() {
             'input[type="tel"]',
             'input[name*="phone" i]',
             'input[name*="mobile" i]',
+            'input[id*="phone" i]',
+            'input[id*="mobile" i]',
           ], passenger.phone, '手机');
           
           if (phoneResult.success) {
