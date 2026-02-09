@@ -122,21 +122,61 @@ export default function BookingScreen() {
           window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'log', message: msg }));
         }
         
+        // 自动点击"添加乘机人"按钮
+        function autoClickAddPassenger() {
+          sendLog('🔍 查找"添加乘机人"按钮...');
+          
+          const buttonTexts = ['添加乘机人', '新增乘机人', '添加旅客', '新增旅客', '添加乘客', '新增乘客', '+更多乘机人'];
+          
+          for (let i = 0; i < buttonTexts.length; i++) {
+            const buttons = document.querySelectorAll('button, a, div[class*="button"], div[class*="btn"]');
+            for (let j = 0; j < buttons.length; j++) {
+              const btn = buttons[j];
+              const text = btn.innerText || btn.textContent || '';
+              if (text.includes(buttonTexts[i])) {
+                sendLog('✓ 找到"' + buttonTexts[i] + '"按钮，自动点击');
+                btn.click();
+                return true;
+              }
+            }
+          }
+          
+          sendLog('ℹ️ 未找到"添加乘机人"按钮');
+          return false;
+        }
+        
         function tryFill() {
           sendLog('🔍 开始分析页面结构...');
           sendStatus('正在分析页面...');
           
+          // 先尝试点击"添加乘机人"
+          autoClickAddPassenger();
+          
+          // 等待500ms让表单弹出
+          setTimeout(function() {
+            fillForm();
+          }, 500);
+        }
+        
+        function fillForm() {
+          sendLog('📝 开始填写表单...');
+          
           const results = [];
           
-          // 填写姓名
+          // 填写姓名（改进：更宽松的匹配）
           sendLog('📝 正在填写姓名...');
           const nameResult = findInput([
             'input[placeholder*="姓名"]',
+            'input[placeholder*="名字"]',
             'input[placeholder*="乘机人"]',
             'input[placeholder*="旅客"]',
             'input[placeholder*="乘客"]',
+            'input[placeholder*="联系人"]',
             'input[name*="name" i]',
-            'input[type="text"]:not([placeholder*="证件"]):not([placeholder*="手机"]):not([placeholder*="电话"])',
+            'input[name*="passenger" i]',
+            'input[id*="name" i]',
+            // 最后兜底：找第一个text类型的input（排除证件和手机）
+            'input[type="text"]:not([placeholder*="证件"]):not([placeholder*="身份证"]):not([placeholder*="手机"]):not([placeholder*="电话"]):not([placeholder*="号码"])',
           ], passenger.name, '姓名');
           
           if (nameResult.success) {
@@ -193,12 +233,12 @@ export default function BookingScreen() {
             setTimeout(function() {
               sendStatus('✅ 已完成自动填表，共填写 ' + results.length + ' 个字段');
             }, 500);
+            return results.length;
           } else {
             sendLog('⚠️ 未找到表单，可能还在搜索页');
             sendStatus('未找到表单，可能还在搜索页');
+            return 0;
           }
-          
-          return results.length;
         }
         
         let attempts = 0;
