@@ -20,7 +20,7 @@ interface PlatformStatus {
 }
 
 export default function ResultsScreen() {
-  const { from, to, date } = useLocalSearchParams<{ from: string; to: string; date: string }>();
+  const { from, to, date, preference } = useLocalSearchParams<{ from: string; to: string; date: string; preference: string }>();
   const [flights, setFlights] = useState<Flight[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

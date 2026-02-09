@@ -9,6 +9,7 @@ export default function SearchScreen() {
   const [name, setName] = useState('');
   const [idNumber, setIdNumber] = useState('');
   const [phone, setPhone] = useState('');
+  const [preference, setPreference] = useState('cheapest'); // 新增：用户偏好
 
   // 读取保存的乘客信息
   useEffect(() => {
@@ -32,17 +33,18 @@ export default function SearchScreen() {
   const [date, setDate] = useState(tomorrow());
 
   const performSearch = async () => {
-    // 保存乘客信息
+    // 保存乘客信息和偏好
     await AsyncStorage.multiSet([
       ['name', name],
       ['idNumber', idNumber],
       ['phone', phone],
+      ['preference', preference], // 保存偏好
     ]);
 
     // 跳转到结果页
     router.push({
       pathname: '/results',
-      params: { from, to, date },
+      params: { from, to, date, preference }, // 传递偏好
     });
   };
 
@@ -127,6 +129,32 @@ export default function SearchScreen() {
             ))}
           </ScrollView>
 
+          {/* 偏好选择 */}
+          <View style={s.preferenceContainer}>
+            <Text style={s.preferenceTitle}>🎯 自动选择偏好</Text>
+            <View style={s.preferenceRow}>
+              <TouchableOpacity
+                style={[s.preferenceBtn, preference === 'cheapest' && s.preferenceBtnOn]}
+                onPress={() => setPreference('cheapest')}
+              >
+                <Text style={[s.preferenceBtnText, preference === 'cheapest' && s.preferenceBtnTextOn]}>💰 最便宜</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.preferenceBtn, preference === 'fastest' && s.preferenceBtnOn]}
+                onPress={() => setPreference('fastest')}
+              >
+                <Text style={[s.preferenceBtnText, preference === 'fastest' && s.preferenceBtnTextOn]}>⚡ 最快</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.preferenceBtn, preference === 'direct' && s.preferenceBtnOn]}
+                onPress={() => setPreference('direct')}
+              >
+                <Text style={[s.preferenceBtnText, preference === 'direct' && s.preferenceBtnTextOn]}>✈️ 直飞</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={s.preferenceTip}>订票时自动选择符合偏好的航班和套餐</Text>
+          </View>
+
           <TouchableOpacity style={s.searchBtn} onPress={doSearch}>
             <Text style={s.searchBtnText}>🔍 搜索航班</Text>
           </TouchableOpacity>
@@ -165,6 +193,14 @@ const s = StyleSheet.create({
   dateLabel: { fontSize: 13, color: '#333' },
   dateSub: { fontSize: 10, color: '#999', marginTop: 1 },
   dateLabelOn: { color: '#fff' },
+  preferenceContainer: { marginBottom: 16, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#f0f0f0' },
+  preferenceTitle: { fontSize: 13, fontWeight: '600', marginBottom: 10, color: '#666' },
+  preferenceRow: { flexDirection: 'row', gap: 8 },
+  preferenceBtn: { flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#e0e0e0', alignItems: 'center', backgroundColor: '#f8f9fa' },
+  preferenceBtnOn: { backgroundColor: '#e3f2fd', borderColor: '#1a73e8' },
+  preferenceBtnText: { fontSize: 13, color: '#666' },
+  preferenceBtnTextOn: { color: '#1a73e8', fontWeight: '600' },
+  preferenceTip: { fontSize: 11, color: '#999', marginTop: 8, textAlign: 'center' },
   searchBtn: { backgroundColor: '#1a73e8', padding: 14, borderRadius: 10, alignItems: 'center' },
   searchBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   input: { borderWidth: 1, borderColor: '#eee', borderRadius: 8, padding: 12, fontSize: 15, marginBottom: 10 },

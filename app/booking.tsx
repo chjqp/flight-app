@@ -5,10 +5,16 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams } from 'expo-router';
 
 export default function BookingScreen() {
-  const { url, platform, flightNo } = useLocalSearchParams<{ url: string; platform: string; flightNo: string }>();
+  const { url, platform, flightNo, preference, targetPrice } = useLocalSearchParams<{ 
+    url: string; 
+    platform: string; 
+    flightNo: string;
+    preference: string;
+    targetPrice: string;
+  }>();
   const webviewRef = useRef<WebView>(null);
   const [status, setStatus] = useState('正在打开页面...');
-  const [logs, setLogs] = useState<string[]>(['📱 启动订票流程...']);
+  const [logs, setLogs] = useState<string[]>(['📱 启动自动订票流程...']);
   const [passenger, setPassenger] = useState<any>(null);
   const [currentUrl, setCurrentUrl] = useState(url || '');
 
@@ -50,13 +56,15 @@ export default function BookingScreen() {
     );
   }
 
-  // 自动填表脚本（改进版 - 修复字段识别错误）
+  // 自动订票脚本（完整版）
   const getFillScript = () => {
     if (!passenger) return '';
     
     return `
       (function() {
         const passenger = ${JSON.stringify(passenger)};
+        const preference = '${preference || 'cheapest'}';
+        const targetPrice = '${targetPrice || ''}';
         const usedInputs = new Set();
         
         function fillInput(el, value) {
@@ -122,6 +130,48 @@ export default function BookingScreen() {
           window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'log', message: msg }));
         }
         
+        // 自动选择套餐（根据偏好）
+        function autoSelectPackage() {
+          sendLog('🎯 根据偏好"' + preference + '"自动选择套餐...');
+          
+          // 找到所有套餐卡片
+          const packages = document.querySelectorAll('div[class*="package"], div[class*="cabin"], li[class*="item"]');
+          sendLog('找到 ' + packages.length + ' 个套餐选项');
+          
+          let bestPackage = null;
+          let bestValue = preference === 'cheapest' ? Infinity : -Infinity;
+          
+          for (let i = 0; i < packages.length; i++) {
+            const pkg = packages[i];
+            const text = pkg.innerText || pkg.textContent || '';
+            
+            // 提取价格
+            const priceMatch = text.match(/¥\\s*(\\d{2,5})|价格[：:]*\\s*(\\d{2,5})|^\\s*(\\d{3,5})\\s*$/m);
+            if (!priceMatch) continue;
+            
+            const price = parseInt(priceMatch[1] || priceMatch[2] || priceMatch[3]);
+            
+            if (preference === 'cheapest' && price < bestValue) {
+              bestValue = price;
+              bestPackage = pkg;
+            }
+          }
+          
+          if (bestPackage) {
+            sendLog('✓ 找到最便宜套餐：¥' + bestValue);
+            // 找到预订按钮
+            const bookBtn = bestPackage.querySelector('button, a, div[class*="book"], div[class*="btn"]');
+            if (bookBtn) {
+              sendLog('✓ 点击预订按钮');
+              bookBtn.click();
+              return true;
+            }
+          }
+          
+          sendLog('⚠️ 未找到合适的套餐');
+          return false;
+        }
+        
         // 自动点击"添加乘机人"按钮
         function autoClickAddPassenger() {
           sendLog('🔍 查找"添加乘机人"按钮...');
@@ -149,13 +199,28 @@ export default function BookingScreen() {
           sendLog('🔍 开始分析页面结构...');
           sendStatus('正在分析页面...');
           
-          // 先尝试点击"添加乘机人"
-          autoClickAddPassenger();
+          // 步骤1：尝试选择套餐
+          const selectedPackage = autoSelectPackage();
+          if (selectedPackage) {
+            sendLog('⏳ 等待页面跳转...');
+            setTimeout(function() {
+              tryFill(); // 递归调用，继续下一步
+            }, 2000);
+            return 0;
+          }
           
-          // 等待500ms让表单弹出
-          setTimeout(function() {
-            fillForm();
-          }, 500);
+          // 步骤2：尝试点击"添加乘机人"
+          const clickedAdd = autoClickAddPassenger();
+          if (clickedAdd) {
+            // 等待500ms让表单弹出
+            setTimeout(function() {
+              fillForm();
+            }, 500);
+            return 0;
+          }
+          
+          // 步骤3：直接填表
+          fillForm();
         }
         
         function fillForm() {
