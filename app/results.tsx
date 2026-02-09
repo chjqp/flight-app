@@ -78,22 +78,36 @@ export default function ResultsScreen() {
       const maxRetries = 20;
       
       function sendData(data) {
-        window.ReactNativeWebView.postMessage(JSON.stringify(data));
+        try {
+          window.ReactNativeWebView.postMessage(JSON.stringify(data));
+        } catch(e) {
+          console.log('postMessage error:', e);
+        }
       }
       
       function sendProgress(attempt) {
         sendData({ type: 'progress', platform: platform, attempt: attempt, max: maxRetries });
+      }
+      
+      function sendDebug(msg) {
+        sendData({ type: 'debug', platform: platform, message: msg });
       }
 
       function tryExtract() {
         retryAttempts++;
         sendProgress(retryAttempts);
         
+        sendDebug('开始提取，尝试 ' + retryAttempts + '/' + maxRetries);
+        
         const flights = [];
         const seen = new Set();
         
         // 遍历所有可能的航班卡片容器
         const containers = document.querySelectorAll('div, li, section, article');
+        sendDebug('找到 ' + containers.length + ' 个容器元素');
+        
+        let priceCount = 0;
+        let timeCount = 0;
         
         for (let i = 0; i < containers.length; i++) {
           const container = containers[i];
@@ -102,16 +116,19 @@ export default function ResultsScreen() {
           // 跳过太长或太短的元素
           if (text.length < 20 || text.length > 500) continue;
           
-          // 查找价格（¥数字格式）
-          const priceMatch = text.match(/¥\\s*(\\d{2,5})/);
+          // 查找价格（¥数字格式，或纯数字）
+          const priceMatch = text.match(/¥\\s*(\\d{2,5})|价格[：:]*\\s*(\\d{2,5})|^\\s*(\\d{3,5})\\s*$/m);
           if (!priceMatch) continue;
-          const price = parseInt(priceMatch[1]);
+          
+          priceCount++;
+          const price = parseInt(priceMatch[1] || priceMatch[2] || priceMatch[3]);
           if (price < 100 || price > 10000) continue;
           
-          // 查找时间（xx:xx格式）
-          const timeMatches = text.match(/\\d{2}:\\d{2}/g);
+          // 查找时间（支持多种格式：xx:xx、x:xx、xx时xx分）
+          const timeMatches = text.match(/\\d{1,2}:\\d{2}|\\d{1,2}时\\d{2}分/g);
           if (!timeMatches || timeMatches.length < 2) continue;
           
+          timeCount++;
           const depTime = timeMatches[0];
           const arrTime = timeMatches[1];
           
@@ -122,7 +139,7 @@ export default function ResultsScreen() {
           
           // 提取航司名
           let airline = '';
-          const airlinePatterns = ['国航', '东航', '南航', '海航', '川航', '春秋', '吉祥', '厦航', '山航', '深航', '昆航'];
+          const airlinePatterns = ['国航', '东航', '南航', '海航', '川航', '春秋', '吉祥', '厦航', '山航', '深航', '昆航', '祥鹏', '瑞丽'];
           for (let j = 0; j < airlinePatterns.length; j++) {
             if (text.includes(airlinePatterns[j])) {
               airline = airlinePatterns[j];
@@ -149,6 +166,8 @@ export default function ResultsScreen() {
           });
         }
         
+        sendDebug('找到 ' + priceCount + ' 个价格，' + timeCount + ' 个时间对');
+        
         // 去重并排序
         const uniqueFlights = [];
         const flightKeys = new Set();
@@ -164,9 +183,12 @@ export default function ResultsScreen() {
         // 按价格排序
         uniqueFlights.sort(function(a, b) { return a.price - b.price; });
         
+        sendDebug('提取到 ' + uniqueFlights.length + ' 个唯一航班');
+        
         if (uniqueFlights.length > 0) {
           sendData({ type: 'flights', platform: platform, data: uniqueFlights });
         } else if (retryAttempts >= maxRetries) {
+          sendDebug('达到最大重试次数，未找到航班');
           sendData({ type: 'notfound', platform: platform });
         }
         
@@ -181,6 +203,7 @@ export default function ResultsScreen() {
       }, 2000);
       
       sendProgress(0);
+      sendDebug('提取脚本已启动');
     })();
     true;
   `;
@@ -189,8 +212,13 @@ export default function ResultsScreen() {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
       
-      if (msg.type === 'flights') {
+      if (msg.type === 'debug') {
+        // 调试信息，打印到控制台
+        console.log(`[${msg.platform}] ${msg.message}`);
+        
+      } else if (msg.type === 'flights') {
         // 收到航班数据
+        console.log(`[${msg.platform}] 找到 ${msg.data.length} 个航班`);
         setFlights(prev => {
           const newFlights = [...prev, ...msg.data];
           // 按价格排序
@@ -206,6 +234,7 @@ export default function ResultsScreen() {
         setCompletedPlatforms(prev => new Set(prev).add(msg.platform));
         
       } else if (msg.type === 'notfound') {
+        console.log(`[${msg.platform}] 未找到航班`);
         setPlatformStatus(prev => ({
           ...prev,
           [msg.platform]: { status: 'notfound', count: 0 }
@@ -215,6 +244,7 @@ export default function ResultsScreen() {
         
       } else if (msg.type === 'progress') {
         // 更新搜索进度
+        console.log(`[${msg.platform}] 进度: ${msg.attempt}/${msg.max}`);
         setPlatformStatus(prev => ({
           ...prev,
           [msg.platform]: { ...prev[msg.platform], status: 'searching' }
@@ -228,7 +258,7 @@ export default function ResultsScreen() {
   // 检查是否所有平台都完成了
   useEffect(() => {
     const shouldShowCtrip = ctripUrl !== null;
-    const totalPlatforms = shouldShowCtrip ? 3 : 2;
+    const totalPlatforms = shouldShowCtrip ? 3 : 2; // 去哪儿、携程、飞猪
     
     if (completedPlatforms.size >= totalPlatforms) {
       setLoading(false);
@@ -338,6 +368,7 @@ export default function ResultsScreen() {
           let statusText = '搜索中...';
           if (status.status === 'found') statusText = `找到${status.count}个 ✓`;
           if (status.status === 'notfound') statusText = '未找到 ✗';
+          if (status.status === 'error') statusText = '加载失败 ✗';
           
           return (
             <Text key={p.key} style={s.platformStatusRow}>
@@ -367,6 +398,11 @@ export default function ResultsScreen() {
               ref={ctripRef}
               source={{ uri: ctripUrl }}
               onMessage={onMessage}
+              onError={(e) => {
+                console.log('[ctrip] WebView error:', e.nativeEvent);
+                setCompletedPlatforms(prev => new Set(prev).add('ctrip'));
+                setPlatformStatus(prev => ({ ...prev, ctrip: { status: 'error', count: 0 } }));
+              }}
               injectedJavaScript={getExtractScript('ctrip')}
               javaScriptEnabled={true}
               domStorageEnabled={true}
@@ -377,6 +413,11 @@ export default function ResultsScreen() {
             ref={fliggyRef}
             source={{ uri: fliggyUrl }}
             onMessage={onMessage}
+            onError={(e) => {
+              console.log('[fliggy] WebView error (证书问题):', e.nativeEvent);
+              setCompletedPlatforms(prev => new Set(prev).add('fliggy'));
+              setPlatformStatus(prev => ({ ...prev, fliggy: { status: 'error', count: 0 } }));
+            }}
             injectedJavaScript={getExtractScript('fliggy')}
             javaScriptEnabled={true}
             domStorageEnabled={true}

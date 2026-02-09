@@ -75,26 +75,32 @@ export default function BookingScreen() {
           return true;
         }
         
-        function findInput(selectors, expectedValue) {
+        function findInput(selectors, expectedValue, fieldName) {
           for (let i = 0; i < selectors.length; i++) {
             const els = document.querySelectorAll(selectors[i]);
             for (let j = 0; j < els.length; j++) {
               const el = els[j];
               if (el && el.offsetParent !== null && !el.disabled && !usedInputs.has(el)) {
-                // 尝试填写并验证
-                fillInput(el, expectedValue);
+                // 尝试填写
+                const filled = fillInput(el, expectedValue);
+                if (!filled) continue;
                 
-                // 验证值是否正确填入
-                if (el.value === expectedValue || el.value.includes(expectedValue)) {
+                // 等待一下让值稳定
+                setTimeout(function() {}, 100);
+                
+                // 验证值是否正确填入（宽松验证）
+                const currentValue = el.value || '';
+                if (currentValue === expectedValue || 
+                    currentValue.includes(expectedValue) ||
+                    expectedValue.includes(currentValue)) {
                   usedInputs.add(el);
+                  sendStatus('✓ ' + fieldName + ': 已填写到 ' + selectors[i]);
                   return { el: el, success: true };
-                } else {
-                  // 填写失败，清空并继续尝试下一个
-                  el.value = '';
                 }
               }
             }
           }
+          sendStatus('✗ ' + fieldName + ': 未找到匹配的输入框');
           return { el: null, success: false };
         }
         
@@ -109,12 +115,13 @@ export default function BookingScreen() {
           
           // 填写姓名
           const nameResult = findInput([
+            'input[placeholder*="姓名"]',
             'input[placeholder*="乘机人"]',
             'input[placeholder*="旅客"]',
-            'input[placeholder*="姓名"]',
-            'input[name*="name" i]',
             'input[placeholder*="乘客"]',
-          ], passenger.name);
+            'input[name*="name" i]',
+            'input[type="text"]:not([placeholder*="证件"]):not([placeholder*="手机"]):not([placeholder*="电话"])',
+          ], passenger.name, '姓名');
           
           if (nameResult.success) {
             const displayName = passenger.name.length > 2 ? passenger.name.substring(0, 2) + '...' : passenger.name;
@@ -123,13 +130,14 @@ export default function BookingScreen() {
           
           // 填写身份证
           const idResult = findInput([
-            'input[placeholder*="证件号码"]',
-            'input[placeholder*="证件"]',
             'input[placeholder*="身份证"]',
-            'input[name*="card" i]',
+            'input[placeholder*="证件号码"]',
+            'input[placeholder*="证件号"]',
+            'input[placeholder*="证件"]',
             'input[name*="idno" i]',
+            'input[name*="card" i]',
             'input[name*="credential" i]',
-          ], passenger.idNumber);
+          ], passenger.idNumber, '身份证');
           
           if (idResult.success) {
             const displayId = passenger.idNumber.length > 4 ? passenger.idNumber.substring(0, 4) + '...' : passenger.idNumber;
@@ -138,13 +146,13 @@ export default function BookingScreen() {
           
           // 填写手机
           const phoneResult = findInput([
-            'input[placeholder*="联系手机"]',
             'input[placeholder*="手机"]',
+            'input[placeholder*="联系手机"]',
             'input[placeholder*="电话"]',
             'input[type="tel"]',
             'input[name*="phone" i]',
             'input[name*="mobile" i]',
-          ], passenger.phone);
+          ], passenger.phone, '手机');
           
           if (phoneResult.success) {
             const displayPhone = passenger.phone.length > 3 ? passenger.phone.substring(0, 3) + '...' : passenger.phone;
