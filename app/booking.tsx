@@ -84,9 +84,6 @@ export default function BookingScreen() {
                 // 尝试填写并验证
                 fillInput(el, expectedValue);
                 
-                // 等待一小会让值生效
-                setTimeout(function() {}, 100);
-                
                 // 验证值是否正确填入
                 if (el.value === expectedValue || el.value.includes(expectedValue)) {
                   usedInputs.add(el);
