@@ -31,8 +31,8 @@ export default function ResultsScreen() {
   
   const [platformStatus, setPlatformStatus] = useState<Record<string, PlatformStatus>>({
     qunar: { status: 'searching', count: 0 },
-    ctrip: { status: 'searching', count: 0 },
-    fliggy: { status: 'searching', count: 0 },
+    // ctrip: { status: 'searching', count: 0 }, // 暂时禁用，需要专门适配
+    // fliggy: { status: 'searching', count: 0 }, // 暂时禁用，证书问题
   });
   
   const [completedPlatforms, setCompletedPlatforms] = useState(new Set<string>());
@@ -257,8 +257,7 @@ export default function ResultsScreen() {
 
   // 检查是否所有平台都完成了
   useEffect(() => {
-    const shouldShowCtrip = ctripUrl !== null;
-    const totalPlatforms = shouldShowCtrip ? 3 : 2; // 去哪儿、携程、飞猪
+    const totalPlatforms = 1; // 只有去哪儿
     
     if (completedPlatforms.size >= totalPlatforms) {
       setLoading(false);
@@ -268,7 +267,7 @@ export default function ResultsScreen() {
         setError('未找到航班');
       }
     }
-  }, [completedPlatforms, flights, ctripUrl]);
+  }, [completedPlatforms, flights]);
 
   const bookFlight = (flight: Flight) => {
     if (Platform.OS === 'web') {
@@ -355,13 +354,13 @@ export default function ResultsScreen() {
   const renderPlatformStatus = () => {
     const platforms = [
       { key: 'qunar', name: '去哪儿', icon: '🟡' },
-      { key: 'ctrip', name: '携程', icon: '🔵', skip: !ctripUrl },
-      { key: 'fliggy', name: '飞猪', icon: '🟣' },
+      // { key: 'ctrip', name: '携程', icon: '🔵', skip: !ctripUrl },
+      // { key: 'fliggy', name: '飞猪', icon: '🟣' },
     ];
 
     return (
       <View style={s.platformStatusContainer}>
-        <Text style={s.platformStatusTitle}>正在搜索...</Text>
+        <Text style={s.platformStatusTitle}>正在搜索去哪儿...</Text>
         {platforms.map(p => {
           if (p.skip) return null;
           const status = platformStatus[p.key];
@@ -376,6 +375,7 @@ export default function ResultsScreen() {
             </Text>
           );
         })}
+        <Text style={s.platformTip}>💡 携程和飞猪正在适配中...</Text>
       </View>
     );
   };
@@ -393,36 +393,7 @@ export default function ResultsScreen() {
             domStorageEnabled={true}
             userAgent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1"
           />
-          {ctripUrl && (
-            <WebView
-              ref={ctripRef}
-              source={{ uri: ctripUrl }}
-              onMessage={onMessage}
-              onError={(e) => {
-                console.log('[ctrip] WebView error:', e.nativeEvent);
-                setCompletedPlatforms(prev => new Set(prev).add('ctrip'));
-                setPlatformStatus(prev => ({ ...prev, ctrip: { status: 'error', count: 0 } }));
-              }}
-              injectedJavaScript={getExtractScript('ctrip')}
-              javaScriptEnabled={true}
-              domStorageEnabled={true}
-              userAgent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1"
-            />
-          )}
-          <WebView
-            ref={fliggyRef}
-            source={{ uri: fliggyUrl }}
-            onMessage={onMessage}
-            onError={(e) => {
-              console.log('[fliggy] WebView error (证书问题):', e.nativeEvent);
-              setCompletedPlatforms(prev => new Set(prev).add('fliggy'));
-              setPlatformStatus(prev => ({ ...prev, fliggy: { status: 'error', count: 0 } }));
-            }}
-            injectedJavaScript={getExtractScript('fliggy')}
-            javaScriptEnabled={true}
-            domStorageEnabled={true}
-            userAgent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1"
-          />
+          {/* 携程和飞猪暂时禁用，需要专门适配 */}
         </View>
       )}
 
@@ -490,4 +461,5 @@ const s = StyleSheet.create({
   platformStatusContainer: { marginTop: 20, backgroundColor: '#fff', borderRadius: 12, padding: 16, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
   platformStatusTitle: { fontSize: 15, fontWeight: '600', marginBottom: 12, textAlign: 'center' },
   platformStatusRow: { fontSize: 14, color: '#666', marginVertical: 4 },
+  platformTip: { fontSize: 12, color: '#999', marginTop: 8, textAlign: 'center' },
 });

@@ -8,17 +8,27 @@ export default function BookingScreen() {
   const { url, platform, flightNo } = useLocalSearchParams<{ url: string; platform: string; flightNo: string }>();
   const webviewRef = useRef<WebView>(null);
   const [status, setStatus] = useState('正在打开页面...');
+  const [logs, setLogs] = useState<string[]>(['📱 启动订票流程...']);
   const [passenger, setPassenger] = useState<any>(null);
   const [currentUrl, setCurrentUrl] = useState(url || '');
 
+  const addLog = (msg: string) => {
+    setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} ${msg}`]);
+    setStatus(msg);
+  };
+
   useEffect(() => {
+    addLog('🔍 正在读取乘客信息...');
     AsyncStorage.multiGet(['name', 'idNumber', 'phone']).then(values => {
       const data: any = {};
       values.forEach(([key, value]) => {
         if (value) data[key] = value;
       });
       if (!data.name || !data.idNumber || !data.phone) {
+        addLog('⚠️ 乘客信息不完整，请返回填写');
         setStatus('⚠️ 乘客信息不完整，请返回填写');
+      } else {
+        addLog(`✓ 已读取：${data.name}, ${data.idNumber.substring(0,4)}..., ${data.phone.substring(0,3)}...`);
       }
       setPassenger(data);
     });
@@ -108,12 +118,18 @@ export default function BookingScreen() {
           window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'status', message: msg }));
         }
         
+        function sendLog(msg) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'log', message: msg }));
+        }
+        
         function tryFill() {
+          sendLog('🔍 开始分析页面结构...');
           sendStatus('正在分析页面...');
           
           const results = [];
           
           // 填写姓名
+          sendLog('📝 正在填写姓名...');
           const nameResult = findInput([
             'input[placeholder*="姓名"]',
             'input[placeholder*="乘机人"]',
@@ -126,9 +142,13 @@ export default function BookingScreen() {
           if (nameResult.success) {
             const displayName = passenger.name.length > 2 ? passenger.name.substring(0, 2) + '...' : passenger.name;
             results.push('✓ 姓名: ' + displayName);
+            sendLog('✓ 姓名已填写');
+          } else {
+            sendLog('✗ 姓名字段未找到');
           }
           
           // 填写身份证
+          sendLog('📝 正在填写身份证...');
           const idResult = findInput([
             'input[placeholder*="身份证"]',
             'input[placeholder*="证件号码"]',
@@ -142,9 +162,13 @@ export default function BookingScreen() {
           if (idResult.success) {
             const displayId = passenger.idNumber.length > 4 ? passenger.idNumber.substring(0, 4) + '...' : passenger.idNumber;
             results.push('✓ 身份证: ' + displayId);
+            sendLog('✓ 身份证已填写');
+          } else {
+            sendLog('✗ 身份证字段未找到');
           }
           
           // 填写手机
+          sendLog('📝 正在填写手机号...');
           const phoneResult = findInput([
             'input[placeholder*="手机"]',
             'input[placeholder*="联系手机"]',
@@ -157,15 +181,20 @@ export default function BookingScreen() {
           if (phoneResult.success) {
             const displayPhone = passenger.phone.length > 3 ? passenger.phone.substring(0, 3) + '...' : passenger.phone;
             results.push('✓ 手机: ' + displayPhone);
+            sendLog('✓ 手机号已填写');
+          } else {
+            sendLog('✗ 手机号字段未找到');
           }
           
           if (results.length > 0) {
             sendStatus(results.join('  '));
+            sendLog('✅ 自动填表完成，共填写 ' + results.length + ' 个字段');
             // 延迟发送汇总消息
             setTimeout(function() {
-              sendStatus('已完成自动填表，共填写 ' + results.length + ' 个字段 ✓');
+              sendStatus('✅ 已完成自动填表，共填写 ' + results.length + ' 个字段');
             }, 500);
           } else {
+            sendLog('⚠️ 未找到表单，可能还在搜索页');
             sendStatus('未找到表单，可能还在搜索页');
           }
           
@@ -175,12 +204,17 @@ export default function BookingScreen() {
         let attempts = 0;
         const timer = setInterval(function() {
           attempts++;
+          sendLog('🔄 尝试填表 (' + attempts + '/20)...');
           const filled = tryFill();
           if (filled > 0 || attempts > 20) {
             clearInterval(timer);
+            if (attempts > 20 && filled === 0) {
+              sendLog('⏱️ 超时：未找到表单');
+            }
           }
         }, 2000);
         
+        sendLog('⏳ 等待页面加载...');
         sendStatus('等待页面加载...');
       })();
       true;
@@ -192,15 +226,19 @@ export default function BookingScreen() {
   };
 
   const onLoadEnd = () => {
+    addLog('✓ 页面加载完成');
     if (!passenger) {
+      addLog('⚠️ 未保存乘客信息，请返回填写');
       setStatus('未保存乘客信息，请返回填写');
       return;
     }
     
     if (isOrderPage(currentUrl)) {
+      addLog('✓ 检测到订票页，准备自动填表');
       const script = getFillScript();
       webviewRef.current?.injectJavaScript(script);
     } else {
+      addLog('ℹ️ 当前在搜索页，请选择航班');
       setStatus('请在页面中选择航班，进入订票页后自动填表');
     }
   };
@@ -210,14 +248,21 @@ export default function BookingScreen() {
       const data = JSON.parse(event.nativeEvent.data);
       if (data.type === 'status') {
         setStatus(data.message);
+      } else if (data.type === 'log') {
+        addLog(data.message);
       }
     } catch (e) {}
   };
 
   const onNavigationStateChange = (navState: any) => {
-    setCurrentUrl(navState.url || '');
+    const newUrl = navState.url || '';
+    if (newUrl !== currentUrl) {
+      addLog(`🌐 页面跳转: ${newUrl.substring(0, 50)}...`);
+    }
+    setCurrentUrl(newUrl);
     
     if (isOrderPage(navState.url) && passenger) {
+      addLog('✓ 检测到订票页，2秒后自动填表');
       setTimeout(() => {
         const script = getFillScript();
         webviewRef.current?.injectJavaScript(script);
@@ -227,10 +272,13 @@ export default function BookingScreen() {
 
   const manualFill = () => {
     if (!passenger) return;
+    addLog('🔄 手动触发填表');
     const script = getFillScript();
     webviewRef.current?.injectJavaScript(script);
     setStatus('正在尝试填表...');
   };
+
+  const [showLogs, setShowLogs] = useState(false);
 
   return (
     <SafeAreaView style={s.safe}>
@@ -239,7 +287,19 @@ export default function BookingScreen() {
         <TouchableOpacity style={s.fillBtn} onPress={manualFill}>
           <Text style={s.fillBtnText}>填表</Text>
         </TouchableOpacity>
+        <TouchableOpacity style={s.logBtn} onPress={() => setShowLogs(!showLogs)}>
+          <Text style={s.logBtnText}>{showLogs ? '隐藏' : '日志'}</Text>
+        </TouchableOpacity>
       </View>
+
+      {showLogs && (
+        <View style={s.logContainer}>
+          <Text style={s.logTitle}>📋 操作日志</Text>
+          {logs.slice(-10).map((log, i) => (
+            <Text key={i} style={s.logText}>{log}</Text>
+          ))}
+        </View>
+      )}
 
       <WebView
         ref={webviewRef}
@@ -274,6 +334,11 @@ const s = StyleSheet.create({
   statusText: { flex: 1, fontSize: 13, color: '#666' },
   fillBtn: { backgroundColor: '#1a73e8', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6, marginLeft: 8 },
   fillBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  logBtn: { backgroundColor: '#666', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6, marginLeft: 8 },
+  logBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  logContainer: { backgroundColor: '#f8f9fa', padding: 12, maxHeight: 200, borderBottomWidth: 1, borderColor: '#eee' },
+  logTitle: { fontSize: 14, fontWeight: '600', marginBottom: 8 },
+  logText: { fontSize: 11, color: '#666', marginVertical: 2, fontFamily: 'monospace' },
   webview: { flex: 1 },
   loadingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
   loadText: { marginTop: 12, color: '#888' },
