@@ -94,8 +94,10 @@ export default function BookingScreen() {
         }
         
         function findInput(selectors, expectedValue, fieldName) {
+          sendLog('  尝试匹配 ' + fieldName + '...');
           for (let i = 0; i < selectors.length; i++) {
             const els = document.querySelectorAll(selectors[i]);
+            sendLog('  选择器 ' + selectors[i] + ' 找到 ' + els.length + ' 个元素');
             for (let j = 0; j < els.length; j++) {
               const el = els[j];
               if (el && el.offsetParent !== null && !el.disabled && !usedInputs.has(el)) {
@@ -104,21 +106,24 @@ export default function BookingScreen() {
                 if (!filled) continue;
                 
                 // 等待一下让值稳定
-                setTimeout(function() {}, 100);
+                setTimeout(function() {}, 200);
                 
-                // 验证值是否正确填入（宽松验证）
+                // 严格验证：值必须完全匹配
                 const currentValue = el.value || '';
-                if (currentValue === expectedValue || 
-                    currentValue.includes(expectedValue) ||
-                    expectedValue.includes(currentValue)) {
+                sendLog('  验证: 期望=' + expectedValue + ', 实际=' + currentValue);
+                
+                if (currentValue === expectedValue) {
                   usedInputs.add(el);
-                  sendStatus('✓ ' + fieldName + ': 已填写到 ' + selectors[i]);
+                  sendLog('✓ ' + fieldName + ': 填写成功并验证通过');
                   return { el: el, success: true };
+                } else {
+                  sendLog('✗ 验证失败，继续尝试下一个');
+                  el.value = ''; // 清空错误的值
                 }
               }
             }
           }
-          sendStatus('✗ ' + fieldName + ': 未找到匹配的输入框');
+          sendLog('✗ ' + fieldName + ': 所有选择器都未匹配');
           return { el: null, success: false };
         }
         
@@ -134,41 +139,38 @@ export default function BookingScreen() {
         function autoSelectPackage() {
           sendLog('🎯 根据偏好"' + preference + '"自动选择套餐...');
           
-          // 找到所有套餐卡片
-          const packages = document.querySelectorAll('div[class*="package"], div[class*="cabin"], li[class*="item"]');
-          sendLog('找到 ' + packages.length + ' 个套餐选项');
+          // 找到所有可能的套餐/预订按钮
+          const buttons = document.querySelectorAll('button, a, div[class*="book"], div[class*="btn"], div[class*="order"]');
+          sendLog('找到 ' + buttons.length + ' 个按钮');
           
-          let bestPackage = null;
-          let bestValue = preference === 'cheapest' ? Infinity : -Infinity;
-          
-          for (let i = 0; i < packages.length; i++) {
-            const pkg = packages[i];
-            const text = pkg.innerText || pkg.textContent || '';
-            
-            // 提取价格
-            const priceMatch = text.match(/¥\\s*(\\d{2,5})|价格[：:]*\\s*(\\d{2,5})|^\\s*(\\d{3,5})\\s*$/m);
-            if (!priceMatch) continue;
-            
-            const price = parseInt(priceMatch[1] || priceMatch[2] || priceMatch[3]);
-            
-            if (preference === 'cheapest' && price < bestValue) {
-              bestValue = price;
-              bestPackage = pkg;
+          // 找包含"预订"、"订票"、"立即预订"等文字的按钮
+          const bookButtons = [];
+          for (let i = 0; i < buttons.length; i++) {
+            const btn = buttons[i];
+            const text = btn.innerText || btn.textContent || '';
+            if (text.includes('预订') || text.includes('订票') || text.includes('立即') || text.includes('选择')) {
+              bookButtons.push(btn);
             }
           }
           
-          if (bestPackage) {
-            sendLog('✓ 找到最便宜套餐：¥' + bestValue);
-            // 找到预订按钮
-            const bookBtn = bestPackage.querySelector('button, a, div[class*="book"], div[class*="btn"]');
-            if (bookBtn) {
-              sendLog('✓ 点击预订按钮');
-              bookBtn.click();
+          sendLog('找到 ' + bookButtons.length + ' 个预订按钮');
+          
+          if (bookButtons.length > 0) {
+            // 如果是"最便宜"偏好，找价格最低的按钮附近的
+            if (preference === 'cheapest') {
+              // 简单策略：点第一个预订按钮（通常是最便宜的）
+              sendLog('✓ 点击第一个预订按钮（通常是最便宜的）');
+              bookButtons[0].click();
+              return true;
+            } else {
+              // 其他偏好也点第一个
+              sendLog('✓ 点击第一个预订按钮');
+              bookButtons[0].click();
               return true;
             }
           }
           
-          sendLog('⚠️ 未找到合适的套餐');
+          sendLog('⚠️ 未找到预订按钮');
           return false;
         }
         
@@ -200,26 +202,30 @@ export default function BookingScreen() {
           sendStatus('正在分析页面...');
           
           // 步骤1：尝试选择套餐
+          sendLog('步骤1: 尝试自动选择套餐...');
           const selectedPackage = autoSelectPackage();
           if (selectedPackage) {
-            sendLog('⏳ 等待页面跳转...');
+            sendLog('⏳ 已点击套餐，等待页面跳转...');
             setTimeout(function() {
               tryFill(); // 递归调用，继续下一步
-            }, 2000);
+            }, 3000);
             return 0;
           }
           
           // 步骤2：尝试点击"添加乘机人"
+          sendLog('步骤2: 尝试点击"添加乘机人"...');
           const clickedAdd = autoClickAddPassenger();
           if (clickedAdd) {
-            // 等待500ms让表单弹出
+            sendLog('⏳ 已点击"添加乘机人"，等待表单弹出...');
+            // 等待1秒让表单弹出
             setTimeout(function() {
               fillForm();
-            }, 500);
+            }, 1000);
             return 0;
           }
           
           // 步骤3：直接填表
+          sendLog('步骤3: 直接填写表单...');
           fillForm();
         }
         

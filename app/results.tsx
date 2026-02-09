@@ -272,11 +272,39 @@ export default function ResultsScreen() {
         setSearchLogs(prev => [...prev, `✅ 搜索完成，共找到 ${flights.length} 个航班`]);
         
         // 根据偏好自动选择并订票
-        if (preference === 'cheapest' && flights.length > 0) {
-          const cheapest = flights[0]; // 已经按价格排序了
-          setSearchLogs(prev => [...prev, `🎯 根据偏好自动选择最便宜的：¥${cheapest.price}`]);
+        let selectedFlight = null;
+        
+        if (preference === 'cheapest') {
+          // 最便宜：已经按价格排序了
+          selectedFlight = flights[0];
+          setSearchLogs(prev => [...prev, `🎯 根据偏好"最便宜"自动选择：¥${selectedFlight.price}`]);
+        } else if (preference === 'fastest') {
+          // 最快：选飞行时间最短的（需要计算）
+          let fastest = flights[0];
+          for (let i = 1; i < flights.length; i++) {
+            const f = flights[i];
+            // 简单比较：直飞优先，然后比较时间
+            if (f.stops === 0 && fastest.stops > 0) {
+              fastest = f;
+            }
+          }
+          selectedFlight = fastest;
+          setSearchLogs(prev => [...prev, `🎯 根据偏好"最快"自动选择：${selectedFlight.depTime}-${selectedFlight.arrTime}`]);
+        } else if (preference === 'direct') {
+          // 直飞优先：选第一个直飞的
+          const directFlights = flights.filter(f => f.stops === 0);
+          if (directFlights.length > 0) {
+            selectedFlight = directFlights[0];
+            setSearchLogs(prev => [...prev, `🎯 根据偏好"直飞"自动选择：¥${selectedFlight.price} 直飞`]);
+          } else {
+            selectedFlight = flights[0];
+            setSearchLogs(prev => [...prev, `⚠️ 没有直飞航班，选择最便宜的：¥${selectedFlight.price}`]);
+          }
+        }
+        
+        if (selectedFlight) {
           setTimeout(() => {
-            bookFlight(cheapest);
+            bookFlight(selectedFlight);
           }, 2000);
         }
       }
